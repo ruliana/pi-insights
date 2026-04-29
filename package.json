@@ -1,0 +1,37 @@
+{
+  "name": "@ruliana/pi-insights",
+  "version": "0.1.0",
+  "description": "Pi skill: analyze session history and generate an interactive HTML report with usage patterns and suggestions",
+  "author": "Ronie",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ruliana/pi-insights.git"
+  },
+  "homepage": "https://github.com/ruliana/pi-insights#readme",
+  "bugs": {
+    "url": "https://github.com/ruliana/pi-insights/issues"
+  },
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-coding-agent",
+    "skill",
+    "analytics",
+    "insights",
+    "reporting"
+  ],
+  "files": [
+    "SKILL.md",
+    "scripts/",
+    "README.md"
+  ],
+  "pi": {
+    "skills": [
+      "./"
+    ]
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
