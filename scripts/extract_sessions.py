@@ -78,6 +78,14 @@ def extract_terms_from_text(text: str) -> list[str]:
         if word not in STOPWORDS:
             terms.append(word)
 
+    # Bigrams and trigrams from consecutive meaningful words (3+ chars, not stopwords)
+    meaningful = [w.lower() for w in re.findall(r'\b[a-zA-Z]{3,}\b', text)
+                  if w.lower() not in STOPWORDS]
+    for i in range(len(meaningful) - 1):
+        terms.append(f"{meaningful[i]} {meaningful[i + 1]}")
+    for i in range(len(meaningful) - 2):
+        terms.append(f"{meaningful[i]} {meaningful[i + 1]} {meaningful[i + 2]}")
+
     return terms
 
 
