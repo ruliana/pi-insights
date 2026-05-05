@@ -56,6 +56,7 @@ def generate_html(data: dict) -> str:
     stats = data.get("stats", {})
     sessions = data.get("sessions", [])
     analysis = data.get("analysis", {})
+    repeated_terms = data.get("repeated_terms", [])
 
     # Aggregate metrics
     total_cost = sum(s.get("total_cost_usd", 0) for s in sessions)
@@ -129,6 +130,70 @@ def generate_html(data: dict) -> str:
                 html_parts.append(f'<div class="suggestion-card"><p>{escape(str(item))}</p></div>')
         html_parts.append('</div>')
         return '\n'.join(html_parts)
+
+    def render_pi_extensions(items):
+        if not items:
+            return '<p class="empty">No Pi extensions, skills, or prompts suggested.</p>'
+        type_icons = {"skill": "🔁", "extension": "🔌", "prompt": "💬"}
+        html_parts = ['<div class="suggestions">']
+        for item in items:
+            if isinstance(item, dict):
+                title = escape(item.get("title", ""))
+                desc = escape(item.get("description", ""))
+                hint = item.get("implementation_hint", "")
+                based_on = escape(item.get("based_on", ""))
+                priority = escape(item.get("priority", ""))
+                item_type = item.get("type", "skill").lower()
+                icon = type_icons.get(item_type, "💡")
+                badge = f'<span class="badge badge-{priority.lower()}">{priority}</span>' if priority else ""
+                type_badge = f'<span class="badge badge-type-{escape(item_type)}">{icon} {escape(item_type)}</span>'
+                based_on_html = f'<div class="based-on">Based on: {based_on}</div>' if based_on else ""
+                html_parts.append(f'''
+                <div class="suggestion-card">
+                    <div class="suggestion-header">{badge} {type_badge} {title}</div>
+                    <p>{desc}</p>
+                    {based_on_html}
+                    {"<pre><code>" + escape(hint) + "</code></pre>" if hint else ""}
+                </div>''')
+            else:
+                html_parts.append(f'<div class="suggestion-card"><p>{escape(str(item))}</p></div>')
+        html_parts.append('</div>')
+        return '\n'.join(html_parts)
+
+    def render_repeated_searches(items):
+        if not items:
+            return '<p class="empty">No agent analysis of repeated terms available.</p>'
+        html_parts = []
+        for item in items:
+            if isinstance(item, dict):
+                term = escape(item.get("term", ""))
+                context = escape(item.get("context", ""))
+                suggestion = escape(item.get("suggestion", ""))
+                impact = escape(item.get("impact", ""))
+                badge = f'<span class="badge badge-{impact.lower()}">{impact}</span> ' if impact else ""
+                html_parts.append(f'''
+                <div class="repeated-search-item">
+                    <div class="repeated-search-term">{badge}<code>{term}</code></div>
+                    {f"<p>{context}</p>" if context else ""}
+                    {f'<p class="suggestion-text">💡 {suggestion}</p>' if suggestion else ""}
+                </div>''')
+            else:
+                html_parts.append(f'<div class="repeated-search-item"><p>{escape(str(item))}</p></div>')
+        return '\n'.join(html_parts)
+
+    def render_repeated_terms_table(items):
+        if not items:
+            return '<p class="empty">No repeated terms detected across sessions.</p>'
+        rows = []
+        for item in items:
+            term = escape(item.get("term", ""))
+            n_sessions = item.get("session_count", 0)
+            total = item.get("total_occurrences", 0)
+            rows.append(f'<tr><td>{term}</td><td>{n_sessions}</td><td>{total}</td></tr>')
+        return f'''<table class="terms-table">
+<thead><tr><th>Term</th><th>Sessions</th><th>Total Uses</th></tr></thead>
+<tbody>{''.join(rows)}</tbody>
+</table>'''
 
     # Build tool usage chart data (simple horizontal bars via CSS)
     max_tool_count = tools_sorted[0][1] if tools_sorted else 1
@@ -280,6 +345,21 @@ code {{ font-family: 'SF Mono', 'Fira Code', monospace; }}
 .footer {{ margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 0.8rem; text-align: center; }}
 .fun {{ font-style: italic; color: var(--accent3); }}
 .tag {{ display: inline-block; background: var(--surface2); color: var(--text-muted); font-size: 0.75rem; padding: 0.1rem 0.5rem; border-radius: 4px; margin: 0.15rem; }}
+.badge-type-skill {{ background: var(--accent2); color: #000; }}
+.badge-type-extension {{ background: var(--accent5); color: #fff; }}
+.badge-type-prompt {{ background: var(--accent); color: #000; }}
+.based-on {{ font-size: 0.8rem; color: var(--text-muted); margin: 0.25rem 0 0.5rem; }}
+.repeated-search-item {{
+    border-left: 3px solid var(--accent);
+    padding: 0.65rem 1rem;
+    margin: 0.5rem 0;
+    background: var(--surface);
+    border-radius: 0 6px 6px 0;
+}}
+.repeated-search-term {{ font-weight: 600; margin-bottom: 0.25rem; }}
+.suggestion-text {{ color: var(--accent2); font-size: 0.9rem; margin-top: 0.25rem; }}
+.terms-table td:first-child {{ font-family: 'SF Mono', 'Fira Code', monospace; color: var(--accent); }}
+.section-hint {{ color: var(--text-muted); font-size: 0.9rem; margin-bottom: 0.75rem; font-style: italic; }}
 </style>
 </head>
 <body>
@@ -354,6 +434,15 @@ code {{ font-family: 'SF Mono', 'Fira Code', monospace; }}
 <div class="section-card">
 {render_list(analysis.get("workflows", []))}
 </div>
+
+<h2>🔌 Pi Extensions, Skills &amp; Prompts</h2>
+<p class="section-hint">Suggested Pi extensions, reusable skills, and AGENTS.md prompts to improve your workflow based on observed patterns.</p>
+{render_pi_extensions(analysis.get("pi_extensions", []))}
+
+<h2>🔍 Repeated Search Terms</h2>
+<p class="section-hint">These terms appeared in user messages across multiple sessions, meaning the agent likely had to re-search for context each time. Adding documentation about them to AGENTS.md reduces repeated lookups.</p>
+{render_repeated_terms_table(repeated_terms)}
+{render_repeated_searches(analysis.get("repeated_searches", []))}
 
 {"<h2>🎭 Fun Summary</h2><div class='section-card fun'>" + escape(analysis.get("fun_summary", "")) + "</div>" if analysis.get("fun_summary") else ""}
 
