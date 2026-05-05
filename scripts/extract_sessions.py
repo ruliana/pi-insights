@@ -11,11 +11,110 @@ Usage:
 
 import json
 import os
+import re
 import sys
 import argparse
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from collections import Counter
+from collections import Counter, defaultdict
+
+
+STOPWORDS = {
+    # English function words
+    'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+    'of', 'with', 'by', 'from', 'as', 'is', 'was', 'are', 'were', 'be',
+    'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will',
+    'would', 'could', 'should', 'may', 'might', 'can', 'this', 'that',
+    'these', 'those', 'it', 'its', 'me', 'you', 'he', 'she', 'we', 'they',
+    'him', 'her', 'us', 'them', 'my', 'your', 'his', 'our', 'their',
+    'what', 'which', 'who', 'how', 'when', 'where', 'why', 'all', 'any',
+    'more', 'most', 'some', 'such', 'no', 'not', 'only', 'same', 'so',
+    'than', 'too', 'very', 'just', 'also', 'up', 'out', 'about', 'into',
+    'through', 'then', 'if', 'each', 'ok', 'yes', 'sure',
+    # Common action/filler words
+    'please', 'need', 'want', 'like', 'now', 'here', 'there', 'look',
+    'see', 'go', 'let', 'well', 'way', 'work', 'using', 'use', 'make',
+    'get', 'add', 'run', 'fix', 'create', 'edit', 'change', 'update',
+    'check', 'set', 'show', 'know', 'think', 'call', 'find', 'help',
+    'used', 'back', 'time', 'first', 'last', 'good', 'new', 'also',
+    # Generic programming vocabulary
+    'function', 'method', 'class', 'variable', 'parameter', 'argument',
+    'return', 'value', 'object', 'array', 'string', 'number', 'boolean',
+    'import', 'export', 'module', 'package', 'library', 'framework',
+    'error', 'exception', 'debug', 'build', 'deploy', 'install',
+    'version', 'config', 'default', 'option', 'type', 'interface',
+    'component', 'service', 'model', 'router', 'database', 'query',
+    'request', 'response', 'server', 'client', 'token', 'index',
+    # Pi-specific generic terms
+    'agent', 'session', 'message', 'tool', 'prompt', 'context', 'project',
+}
+
+
+def extract_terms_from_text(text: str) -> list[str]:
+    """Extract potentially meaningful repeated terms from user message text."""
+    terms = []
+
+    # File paths: foo/bar.py, ./config.json, src/components/X
+    for m in re.finditer(r'(?:\.{0,2}/)?(?:\w[\w.-]*/)+[\w.-]+', text):
+        terms.append(m.group().lower())
+
+    # PascalCase / camelCase identifiers (signals: class names, functions)
+    for m in re.finditer(r'\b(?:[A-Z][a-z]+){2,}\b|\b[a-z]+(?:[A-Z][a-z]+)+\b', text):
+        terms.append(m.group().lower())
+
+    # snake_case identifiers (at least one underscore)
+    for m in re.finditer(r'\b[a-z][a-z0-9]+(?:_[a-z0-9]+)+\b', text):
+        terms.append(m.group())
+
+    # Quoted strings that look like identifiers or filenames
+    for m in re.finditer(r'["\']([^"\']{3,40})["\']', text):
+        candidate = m.group(1).lower()
+        if re.search(r'[a-z]', candidate):
+            terms.append(candidate)
+
+    # Words 6+ chars that aren't stopwords
+    for m in re.finditer(r'\b([a-zA-Z]{6,})\b', text):
+        word = m.group(1).lower()
+        if word not in STOPWORDS:
+            terms.append(word)
+
+    return terms
+
+
+def compute_repeated_terms(sessions: list[dict], min_sessions: int = 2, min_count: int = 3) -> list[dict]:
+    """Find terms appearing in user transcripts across multiple sessions.
+
+    These terms are candidates for pre-loaded context in AGENTS.md, since the
+    agent likely had to re-search for them each time.
+    """
+    term_data: dict[str, dict] = defaultdict(lambda: {"sessions": set(), "total": 0, "examples": []})
+
+    for session in sessions:
+        session_id = session.get("session_id", "")
+        project = session.get("project", "")
+        text = " ".join(session.get("user_transcript", []))
+        session_terms = Counter(extract_terms_from_text(text))
+
+        for term, count in session_terms.items():
+            td = term_data[term]
+            td["sessions"].add(session_id)
+            td["total"] += count
+            if len(td["examples"]) < 3:
+                td["examples"].append({"project": project, "count": count})
+
+    result = []
+    for term, data in term_data.items():
+        n_sessions = len(data["sessions"])
+        if n_sessions >= min_sessions and data["total"] >= min_count:
+            result.append({
+                "term": term,
+                "session_count": n_sessions,
+                "total_occurrences": data["total"],
+                "examples": data["examples"][:3],
+            })
+
+    result.sort(key=lambda x: (-x["session_count"], -x["total_occurrences"]))
+    return result[:30]
 
 
 def parse_session_file(filepath: Path) -> dict | None:
@@ -227,9 +326,12 @@ def main():
         "cutoff": cutoff.isoformat(),
     }
 
+    repeated_terms = compute_repeated_terms(summaries)
+
     output = {
         "stats": stats,
         "sessions": summaries,
+        "repeated_terms": repeated_terms,
     }
 
     json.dump(output, sys.stdout, indent=2)
